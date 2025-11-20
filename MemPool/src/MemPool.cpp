@@ -3,6 +3,7 @@
 #include <cassert>
 
 constexpr size_t CACHE_LINE = 64;
+thread_local Slot* MemoryPool::threadFreeList_ = nullptr;
 
 struct GrowthRule {
 	int count;
@@ -45,61 +46,47 @@ void MemoryPool::init(size_t size)
 
 void* MemoryPool::allocate()
 {
-	//std::cout << "allocate-1" << std::endl;
-	//std::lock_guard<std::mutex> lock(mutexForBlock_);
-	//std::cout << "allocate-2" << std::endl;
-
-	// 优先使用空闲链表中的内存槽
-	Slot* slot = popFreeList();
-	if (slot != nullptr) {
-		//BlockHeader* header = findBlockHeader(slot);
-		//header->usedSlots.fetch_add(1, std::memory_order_relaxed);
+	if (threadFreeList_) {
+		Slot* slot = threadFreeList_;
+		threadFreeList_ = slot->next;
 		return slot;
 	}
 
-	Slot* temp;
+	Slot* slot = popFreeList();
+	if(slot)
+		return slot;
+
 	{
-		/* ********************************************* */
 		std::lock_guard<std::mutex> lock(mutexForBlock_);
 		if (curSlot_ >= lastSlot_)
 		{
 			allocateNewBlock();
 		}
 
-		temp = curSlot_;
-		// 这里不能直接 curSlot_ += SlotSize_ 因为curSlot_是Slot*类型，所以需要除以SlotSize_再加1
-		//curSlot_ += SlotSize_ / sizeof(Slot);
+		slot = curSlot_;
 		curSlot_++;
-		//BlockHeader* header = findBlockHeader(temp);
-		//header->usedSlots.fetch_add(1, std::memory_order_relaxed);
 	}
-
-	return temp;
+	return slot;
 }
 
 void MemoryPool::deallocate(void* ptr)
 {
-	if (!ptr) {
-		return;
-	}
-	//std::lock_guard<std::mutex> lock(mutexForBlock_);
+	static const size_t MAX_THREAD_FREELIST_SIZE = 100; // 限制最大长度
+	static thread_local size_t threadFreeListSize = 0;  // 每个线程维护自己的计数器
 
 	Slot* slot = reinterpret_cast<Slot*>(ptr);
-	/*BlockHeader* header = findBlockHeader(slot);
-	std::cout << "Deallocate: slot=" << slot << ", header=" << header << std::endl;
 
-	size_t prev = header->usedSlots.fetch_sub(1, std::memory_order_relaxed);*/
+	// 将 Slot 放入 threadFreeList_
+	slot->next = threadFreeList_;
+	threadFreeList_ = slot;
 
-	pushFreeList(slot);
-
-	//如果递减后为0，回收整块
-	//if (prev == 1) {
-	//	std::cout << "Delete Block: " << header << std::endl;
-
-	//	removeBlock(header);
-	//	operator delete(reinterpret_cast<void*>(header));
-	//}
-
+	threadFreeListSize++;
+	if (threadFreeListSize > MAX_THREAD_FREELIST_SIZE) {
+		// 将多余的 Slot 归还到全局 freeList_
+		pushFreeList(threadFreeList_);
+		threadFreeList_ = nullptr;
+		threadFreeListSize = 0;
+	}
 }
 
 /*
@@ -176,19 +163,16 @@ size_t MemoryPool::padPointer(char* p, size_t align)
 // 实现无锁入队操作
 bool MemoryPool::pushFreeList(Slot* slot)
 {
-	//std::cout << "Push Slot: " << slot << std::endl;
-
 	while (true)
 	{
 		Slot* oldHead = freeList_.load(std::memory_order_relaxed);
 		slot->next.store(oldHead, std::memory_order_relaxed);
 		if (freeList_.compare_exchange_weak(oldHead, slot,
-			std::memory_order_release, std::memory_order_relaxed))
+				std::memory_order_release, std::memory_order_relaxed))
 		{
+			//std::cout << "Slot pushed from freeList_: " << slot << std::endl;
 			return true;
 		}
-		// 失败：说明另一个线程可能已经修改了 freeList_
-		// CAS 失败则重试
 	}
 }
 
@@ -198,11 +182,11 @@ Slot* MemoryPool::popFreeList()
 	while (true)
 	{
 		Slot* oldHead = freeList_.load(std::memory_order_acquire);
-		//std::cout << "Pop Slot: " << oldHead << std::endl;
-		if (oldHead == nullptr)
-			return nullptr; // 队列为空
+		if (oldHead == nullptr) {
+			//std::cout << "freeList_ is empty" << std::endl;
+			return nullptr;
+		}
 
-		// 在访问 newHead 之前再次验证 oldHead 的有效性
 		Slot* newHead = nullptr;
 		try
 		{
@@ -214,15 +198,12 @@ Slot* MemoryPool::popFreeList()
 			continue;
 		}
 
-		// 尝试更新头结点
-		// 原子性地尝试将 freeList_ 从 oldHead 更新为 newHead
 		if (freeList_.compare_exchange_weak(oldHead, newHead,
 			std::memory_order_acquire, std::memory_order_relaxed))
 		{
+			//std::cout << "Slot popped from freeList_: " << oldHead << std::endl;
 			return oldHead;
 		}
-		// 失败：说明另一个线程可能已经修改了 freeList_
-		// CAS 失败则重试
 	}
 }
 

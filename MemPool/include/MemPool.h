@@ -1,7 +1,4 @@
-﻿// MemPool.h: 标准系统包含文件的包含文件
-// 或项目特定的包含文件。
-
-#pragma once
+﻿#pragma once
 
 #include <atomic>
 #include <cassert>
@@ -18,6 +15,7 @@
 
 static size_t g_slotSizes[MEMORY_POOL_NUM];	// 每个内存池对应的slot大小
 static bool g_slotSizeInitialized = false;	// 是否初始化过slot大小数组
+
 
 struct BlockHeader {
 	BlockHeader* next;
@@ -51,7 +49,7 @@ public:
 
 	//辅助接口
 	//BlockHeader* findBlockHeader(Slot* slot);
-	//void removeBlock(BlockHeader* header);
+	void removeBlock(BlockHeader* header);
 
 private:
 	void allocateNewBlock();
@@ -61,6 +59,7 @@ private:
 	Slot* popFreeList();
 
 private:
+	static thread_local Slot* threadFreeList_;
 	size_t BlockSize_;
 	size_t initialBlockSize_; // 记录最初的块大小
 	int SlotSize_;
@@ -71,7 +70,6 @@ private:
 	std::atomic<Slot*> freeList_;
 	Slot* lastSlot_;
 	std::mutex mutexForBlock_;
-
 };
 
 class HashBucket

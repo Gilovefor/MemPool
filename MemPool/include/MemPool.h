@@ -49,7 +49,9 @@ public:
 
 	//辅助接口
 	//BlockHeader* findBlockHeader(Slot* slot);
-	void removeBlock(BlockHeader* header);
+	//void removeBlock(BlockHeader* header);
+
+	bool isValidPointer(Slot* slot);
 
 private:
 	void allocateNewBlock();
@@ -134,5 +136,42 @@ void deleteElement(T* p) {
 		HashBucket::freeMemory(reinterpret_cast<void*>(p), sizeof(T));
 	}
 }
+
+template<typename T>
+class MemPoolAllocator {
+public:
+	using value_type = T;
+
+	MemPoolAllocator() noexcept {}
+	template<typename U>
+	MemPoolAllocator(const MemPoolAllocator<U>&) noexcept {}
+
+	T* allocate(std::size_t n) {
+		// 只支持单个对象分配（适合小对象池），大于最大slot则走系统分配
+		if (n == 1 && sizeof(T) <= MAX_SLOT_SIZE) {
+			return static_cast<T*>(HashBucket::useMemory(sizeof(T)));
+		}
+		else {
+			return static_cast<T*>(::operator new(n * sizeof(T)));
+		}
+	}
+
+	void deallocate(T* p, std::size_t n) noexcept {
+		if (n == 1 && sizeof(T) <= MAX_SLOT_SIZE) {
+			HashBucket::freeMemory(p, sizeof(T));
+		}
+		else {
+			::operator delete(p);
+		}
+	}
+
+	template<typename U>
+	struct rebind { using other = MemPoolAllocator<U>; };
+};
+
+template<typename T, typename U>
+inline bool operator==(const MemPoolAllocator<T>&, const MemPoolAllocator<U>&) { return true; }
+template<typename T, typename U>
+inline bool operator!=(const MemPoolAllocator<T>&, const MemPoolAllocator<U>&) { return false; }
 
 

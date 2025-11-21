@@ -90,12 +90,81 @@ void BenchmarkNew(size_t ntimes, size_t nworks, size_t rounds)
 }
 
 
+// MemPoolAllocator 基本功能测试
+void TestMemPoolAllocatorBasic() {
+    std::cout << "==== MemPoolAllocator Basic Function Test ====" << std::endl;
+    std::vector<P1, MemPoolAllocator<P1>> v1;
+    for (int i = 0; i < 10; ++i) {
+        v1.emplace_back();
+    }
+    std::cout << "v1.size() = " << v1.size() << std::endl;
+    v1.clear();
+    std::cout << "v1 cleared, size = " << v1.size() << std::endl;
+
+    std::vector<P2, MemPoolAllocator<P2>> v2(5);
+    std::cout << "v2.size() = " << v2.size() << std::endl;
+    v2.clear();
+    std::cout << "v2 cleared, size = " << v2.size() << std::endl;
+}
+
+// MemPoolAllocator 扩容与多类型测试
+void TestMemPoolAllocatorAdvanced() {
+    std::cout << "==== MemPoolAllocator Advanced Test ====" << std::endl;
+    std::vector<P3, MemPoolAllocator<P3>> v3;
+    for (int i = 0; i < 50; ++i) {
+        v3.push_back(P3());
+    }
+    std::cout << "v3.size() = " << v3.size() << std::endl;
+
+    std::vector<P4, MemPoolAllocator<P4>> v4;
+    v4.reserve(20);
+    for (int i = 0; i < 20; ++i) {
+        v4.emplace_back();
+    }
+    std::cout << "v4.size() = " << v4.size() << std::endl;
+}
+
+// 简单性能对比
+void TestMemPoolAllocatorPerformance() {
+    std::cout << "==== MemPoolAllocator Performance Test ====" << std::endl;
+    auto t1 = std::chrono::high_resolution_clock::now();
+    std::vector<P1, MemPoolAllocator<P1>> v;
+    for (int i = 0; i < 10000; ++i) v.emplace_back();
+    auto t2 = std::chrono::high_resolution_clock::now();
+    std::cout << "MemPoolAllocator: "
+        << std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count()
+        << " us" << std::endl;
+
+    t1 = std::chrono::high_resolution_clock::now();
+    std::vector<P1> vstd;
+    for (int i = 0; i < 10000; ++i) vstd.emplace_back();
+    t2 = std::chrono::high_resolution_clock::now();
+    std::cout << "std::allocator: "
+        << std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count()
+        << " us" << std::endl;
+}
+
+// 验证内存池分配日志
+void TestMemPoolAllocatorLog() {
+    std::cout << "==== MemPoolAllocator Block Allocation Log ====" << std::endl;
+    std::vector<P1, MemPoolAllocator<P1>> vlog;
+    for (int i = 0; i < 200; ++i) vlog.emplace_back();
+    vlog.clear();
+}
+
 int main()
 {
     HashBucket::initMemoryPool(); // 使用内存池接口前一定要先调用该函数
-    BenchmarkMemoryPool(200, 10, 10); // 测试内存池
+
+    BenchmarkMemoryPool(500, 20, 10); // 测试内存池
     std::cout << "===========================================================================" << std::endl;
-    BenchmarkNew(200, 10, 10); // 测试 new delete
+    BenchmarkNew(500, 20, 10); // 测试 new delete
+
+	std::cout << "===========================================================================" << std::endl;
+    TestMemPoolAllocatorBasic();
+    TestMemPoolAllocatorAdvanced();
+    TestMemPoolAllocatorPerformance();
+    TestMemPoolAllocatorLog();
 
     return 0;
 }

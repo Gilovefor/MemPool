@@ -120,6 +120,22 @@ void MemoryPool::removeBlock(BlockHeader* header)
 }
 */
 
+bool MemoryPool::isValidPointer(Slot* slot)
+{
+	if (slot == nullptr) 
+		return false;
+	BlockHeader* cur = firstBlock_;
+	while (cur) {
+		char* blockStart = reinterpret_cast<char*>(cur);
+		char* blockEnd = blockStart + BlockSize_;
+		if (reinterpret_cast<char*>(slot) >= blockStart && reinterpret_cast<char*>(slot) < blockEnd) {
+			return true;
+		}
+		cur = cur->next;
+	}
+	return false;
+}
+
 void MemoryPool::allocateNewBlock()
 {
 	// 根据 SlotSize_ 选择 block 大小
@@ -176,13 +192,14 @@ bool MemoryPool::pushFreeList(Slot* slot)
 	}
 }
 
+
 // 实现无锁出队操作
 Slot* MemoryPool::popFreeList()
 {
 	while (true)
 	{
 		Slot* oldHead = freeList_.load(std::memory_order_acquire);
-		if (oldHead == nullptr) {
+		if (!isValidPointer(oldHead)) {
 			//std::cout << "freeList_ is empty" << std::endl;
 			return nullptr;
 		}
